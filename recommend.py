@@ -6,6 +6,7 @@
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 import data
@@ -58,7 +59,51 @@ def readable(slug: str) -> str:
     return " ".join(w.capitalize() for w in slug.split("-"))
 
 
-def recommend(films: pd.DataFrame, predictions: pd.Series, mine: pd.DataFrame, args) -> pd.DataFrame:
+def sequence_films(films: pd.DataFrame, m: model.Model) -> pd.DataFrame:
+    """Order selected films by SVD-factor similarity, starting with the highest-ranked film.
+
+    The selected set stays fixed: this changes watch order, not which films are recommended.
+    A nearest-neighbor path is improved by reversing segments when that increases the sum
+    of adjacent cosine similarities.
+    """
+    if len(films) < 2:
+        return films
+
+    positions = pd.Index(m.movie_ids).get_indexer(films["movie_id"])
+    if (positions < 0).any():
+        raise ValueError("Cannot sequence a film missing from the trained model")
+    factors = m.item_factors[positions].astype(np.float64)
+    lengths = np.linalg.norm(factors, axis=1, keepdims=True)
+    unit = np.divide(factors, lengths, out=np.zeros_like(factors), where=lengths != 0)
+    similarity = unit @ unit.T
+
+    path = [0]
+    remaining = set(range(1, len(films)))
+    while remaining:
+        next_film = max(remaining, key=lambda i: (similarity[path[-1], i], -i))
+        path.append(next_film)
+        remaining.remove(next_film)
+
+    # Keep the best-ranked film first. Reversing a segment changes only its boundary edges.
+    for _ in range(10):
+        improved = False
+        for start in range(1, len(path) - 1):
+            for end in range(start + 1, len(path)):
+                before = similarity[path[start - 1], path[start]]
+                after = similarity[path[start - 1], path[end]]
+                if end + 1 < len(path):
+                    before += similarity[path[end], path[end + 1]]
+                    after += similarity[path[start], path[end + 1]]
+                if after > before + 1e-10:
+                    path[start:end + 1] = reversed(path[start:end + 1])
+                    improved = True
+        if not improved:
+            break
+    return films.iloc[path]
+
+
+def recommend(films: pd.DataFrame, predictions: pd.Series, mine: pd.DataFrame, args,
+              m: model.Model | None = None) -> pd.DataFrame:
     candidates = films[films["count"] >= args.min_count].copy()
     # Tiers come from the whole eligible pool, so a film's tier doesn't depend on what you've seen.
     candidates["tier"] = assign_tiers(candidates)
@@ -72,6 +117,10 @@ def recommend(films: pd.DataFrame, predictions: pd.Series, mine: pd.DataFrame, a
         out = mixed(candidates, args.top)
     else:
         out = candidates.nlargest(args.top, "score")
+    if args.sequence:
+        if m is None:
+            raise ValueError("--sequence requires the trained model's film factors")
+        out = sequence_films(out, m)
     out = out.reset_index(drop=True)
     return pd.DataFrame({
         "rank": out.index + 1,
@@ -92,6 +141,8 @@ def parse_args():
     pop.add_argument("--popularity", type=float, default=0, metavar="N",
                      help="exclude the top N%% most-rated films, 0-100 (default 0)")
     pop.add_argument("--mix", action="store_true", help="equal share from popular / mid / obscure tiers")
+    p.add_argument("--sequence", action="store_true",
+                   help="order selected recommendations so adjacent films have similar rating patterns")
     p.add_argument("--min-count", type=int, default=50,
                    help="ignore films with fewer community ratings (default 50, like the original's MOVIE_MIN)")
     p.add_argument("--shrink", type=float, default=300, metavar="K",
@@ -124,7 +175,7 @@ def main():
               f"(baselines: your mean {h['my_mean_rmse']}, film's community mean {h['film_mean_rmse']})")
     print(f"Model: {m.meta['train_ratings']:,} ratings, {m.meta['train_seconds']}s, peak {m.meta['peak_rss_gb']} GB\n")
 
-    recs = recommend(films, m.predict(), matched, args)
+    recs = recommend(films, m.predict(), matched, args, m)
     with pd.option_context("display.max_rows", None, "display.width", 200, "display.max_colwidth", 60):
         print(recs.to_string(index=False))
     if args.csv:

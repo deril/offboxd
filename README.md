@@ -25,6 +25,16 @@ Export your data from Letterboxd (Settings → Data → Export your data) and un
 uv run recommend.py --ratings ~/Downloads/letterboxd-<you>-<date>/ratings.csv --top 250 --mix --links recommendations.txt
 ```
 
+To turn the selected recommendations into a taste-based watch order, add `--sequence`:
+
+```bash
+uv run recommend.py --ratings ~/Downloads/letterboxd-<you>-<date>/ratings.csv --top 50 --sequence --links watch-order.txt
+```
+
+The first film is the highest-scoring pick. Later films are arranged so neighbors have similar
+community rating patterns. This changes the order, not the selected films or their scores; the
+`rank` column becomes the viewing position. It does not infer story, franchise, or release order.
+
 The first run downloads the dataset (~100 MB, cached in `data/hf/`). It then trains the model twice,
 once for the recommendations and once for the holdout check, which takes ~50 s and ~1.8 GB of RAM on
 an M-series Mac. Later runs reuse the cached model in `data/models/` and finish in about a second.
@@ -37,6 +47,7 @@ an M-series Mac. Later runs reuse the cached model in `data/models/` and finish 
 | `--top N` | 50 | Number of recommendations. |
 | `--popularity N` | 0 | Exclude the top N% most-rated films (0–100), like the original site's slider. The percentile is over films with at least `--min-count` ratings. The run prints the rating-count cutoff it applied. |
 | `--mix` | off | Balanced list: an equal share of the best-scoring films from each popularity tier, grouped popular → mid → obscure. Cannot be combined with `--popularity`. |
+| `--sequence` | off | Arrange the selected films into a taste-based viewing order using similarity between model film factors. Works with `--mix` or `--popularity`. |
 | `--shrink K` | 300 | Rank by the prediction pulled toward your mean rating by K/(count+K), so titles with a small devoted fanbase lose ties to better-supported films. Under `--mix` this reorders films within each tier. 0 ranks by the raw prediction. |
 | `--min-count N` | 50 | Ignore films with fewer than N community ratings. 50 matches the original's `MOVIE_MIN`. Lower values let small-fanbase titles (concert films, TV specials) flood the list. |
 | `--overrides PATH` | `./overrides.csv` | Manual title→slug fixes (see below). |
