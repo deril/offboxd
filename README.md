@@ -22,7 +22,7 @@ Export your data from Letterboxd (Settings → Data → Export your data) and un
 `ratings.csv` is used.
 
 ```bash
-uv run recommend.py --ratings ~/Downloads/letterboxd-<you>-<date>/ratings.csv --top 50 --mix
+uv run recommend.py --ratings ~/Downloads/letterboxd-<you>-<date>/ratings.csv --top 250 --mix --links recommendations.txt
 ```
 
 The first run downloads the dataset (~100 MB, cached in `data/hf/`). It then trains the model twice,
