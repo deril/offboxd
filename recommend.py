@@ -103,6 +103,7 @@ def parse_args():
     p.add_argument("--retrain", action="store_true", help="ignore the cached model")
     p.add_argument("--no-eval", action="store_true", help="skip the 10%% holdout RMSE check when training")
     p.add_argument("--csv", type=Path, help="also save the results to this CSV")
+    p.add_argument("--links", type=Path, help="also save the letterboxd.com links, one per line, to this file")
     args = p.parse_args()
     if not 0 <= args.popularity < 100:
         p.error("--popularity must be in [0, 100)")
@@ -129,6 +130,9 @@ def main():
     if args.csv:
         recs.to_csv(args.csv, index=False)
         print(f"\nSaved {len(recs)} rows to {args.csv}")
+    if args.links:
+        args.links.write_text("".join(url + "\n" for url in recs["url"]))
+        print(f"Saved {len(recs)} links to {args.links}")
 
 
 if __name__ == "__main__":

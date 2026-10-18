@@ -44,6 +44,7 @@ an M-series Mac. Later runs reuse the cached model in `data/models/` and finish 
 | `--retrain` | off | Ignore the cached model. |
 | `--no-eval` | off | Skip the holdout check, which halves training time. |
 | `--csv PATH` | – | Also write the results to a CSV file. |
+| `--links PATH` | – | Also write just the letterboxd.com links, one per line. |
 
 ### Popularity tiers
 
