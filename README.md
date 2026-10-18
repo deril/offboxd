@@ -125,3 +125,7 @@ them next to two baselines (always predicting your mean, and predicting each fil
 - `match.py`: slug reconstruction, overrides, match report
 - `model.py`: training, memory budget, holdout RMSE, model cache
 - `recommend.py`: CLI, popularity filter and tiers, output
+
+## License
+
+GPL-3.0. See [LICENSE](LICENSE).

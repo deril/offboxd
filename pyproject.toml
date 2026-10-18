@@ -2,6 +2,8 @@
 name = "letterboxd-recommender"
 version = "0.1.0"
 requires-python = ">=3.13"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 dependencies = [
     "huggingface-hub>=2.2.0",
     "numpy>=2.5.4",
