@@ -35,7 +35,8 @@ an M-series Mac. Later runs reuse the cached model in `data/models/` and finish 
 | `--ratings PATH` | required | Your Letterboxd `ratings.csv`. |
 | `--top N` | 50 | Number of recommendations. |
 | `--popularity N` | 0 | Exclude the top N% most-rated films (0–100), like the original site's slider. The percentile is over films with at least `--min-count` ratings. The run prints the rating-count cutoff it applied. |
-| `--mix` | off | Balanced list: an equal share of the best predictions from each popularity tier. Cannot be combined with `--popularity`. |
+| `--mix` | off | Balanced list: an equal share of the best-scoring films from each popularity tier, grouped popular → mid → obscure. Cannot be combined with `--popularity`. |
+| `--shrink K` | 300 | Rank by the prediction pulled toward your mean rating by K/(count+K), so titles with a small devoted fanbase lose ties to better-supported films. Under `--mix` this reorders films within each tier. 0 ranks by the raw prediction. |
 | `--min-count N` | 50 | Ignore films with fewer than N community ratings. 50 matches the original's `MOVIE_MIN`. Lower values let small-fanbase titles (concert films, TV specials) flood the list. |
 | `--overrides PATH` | `./overrides.csv` | Manual title→slug fixes (see below). |
 | `--sample N` | full dataset | Train on ~N community ratings, sampled as whole users so each kept profile stays complete. |
@@ -53,8 +54,14 @@ therefore thirds of rating *volume*:
 - **mid**: the next third (~4.7k films, roughly 355–1,478 ratings)
 - **obscure**: everything else with at least `--min-count` ratings
 
-Recommendations are ranked by the raw SVD score, and the displayed rating is capped at 5.0 afterwards.
-Like the original, this keeps films predicted above 5.0 in order instead of tying them all at 5.0.
+The output has two columns: `score` (what the list is ranked by) and `predicted` (the SVD's
+estimate of your rating, capped at 5.0 for display). With `--shrink`, a film with a higher
+`predicted` can rank below one with fewer extremes but more ratings.
+
+`--shrink` is a heuristic, not a calibrated confidence correction. K=300 was chosen by inspecting the
+top of each tier: at 0, concert films and TV specials with 50–100 ratings lead the obscure tier; at
+100 most of them are gone; at 300 they are replaced by films like Shoah, The Human Condition and
+The Ascent; at 1000 the obscure tier drifts toward its most-rated end.
 
 That same long tail is why `--popularity` gets aggressive quickly: `--popularity 30` already
 excludes every film with 33+ ratings. Try `--popularity 1` to `--popularity 5` to drop just the
@@ -96,8 +103,10 @@ them next to two baselines (always predicting your mean, and predicting each fil
 ## Known quirks
 
 - Letterboxd lists TV series, concert films, and "making of" specials alongside films. Their small,
-  devoted audiences rate them ~4.8, so the ones above `--min-count` can still rank high. The original
-  dropped TV using TMDB metadata, which this dataset doesn't have.
+  devoted audiences rate them ~4.8. `--min-count` and `--shrink` push most of them down, but
+  film-only output is not guaranteed: well-rated miniseries (Maid, When They See Us) and the odd
+  concert film still appear. The original dropped TV using TMDB metadata, which this dataset doesn't
+  have.
 - Titles are reconstructed from slugs, so punctuation is lost and a year suffix can appear
   (`Poor Things 2023`). The link column always goes to the right page.
 

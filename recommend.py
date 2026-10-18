@@ -4,7 +4,6 @@
 """
 
 import argparse
-import math
 from pathlib import Path
 
 import pandas as pd
@@ -37,33 +36,47 @@ def exclude_most_popular(candidates: pd.DataFrame, percent: float) -> pd.DataFra
     return candidates[candidates["count"] < cutoff]
 
 
+def shrink(predicted: pd.Series, counts: pd.Series, base: float, k: float) -> pd.Series:
+    """Rank score: pull each prediction toward `base` by k / (count + k).
+
+    A heuristic, not a calibrated confidence bound. Titles with a few hundred ratings from a devoted
+    fanbase (concert films, TV specials) get extreme predictions; this lets them lose ties to
+    better-supported films. k=0 ranks by the raw prediction.
+    """
+    return base + counts / (counts + k) * (predicted - base)
+
+
 def mixed(candidates: pd.DataFrame, top: int) -> pd.DataFrame:
-    """Best predictions from each popularity tier in equal shares, so obscure films aren't crowded out."""
-    per_tier = math.ceil(top / len(TIERS))
-    picks = candidates.sort_values("predicted", ascending=False).groupby("tier").head(per_tier)
-    return picks.head(top)
+    """Best-scoring films from each popularity tier in equal shares, grouped popular -> mid -> obscure."""
+    share, extra = divmod(top, len(TIERS))
+    order = TIERS[::-1]
+    return pd.concat([candidates[candidates["tier"] == t].nlargest(share + (i < extra), "score")
+                      for i, t in enumerate(order)])
 
 
 def readable(slug: str) -> str:
     return " ".join(w.capitalize() for w in slug.split("-"))
 
 
-def recommend(films: pd.DataFrame, predictions: pd.Series, rated: set, args) -> pd.DataFrame:
+def recommend(films: pd.DataFrame, predictions: pd.Series, mine: pd.DataFrame, args) -> pd.DataFrame:
     candidates = films[films["count"] >= args.min_count].copy()
     # Tiers come from the whole eligible pool, so a film's tier doesn't depend on what you've seen.
     candidates["tier"] = assign_tiers(candidates)
     candidates = exclude_most_popular(candidates, args.popularity)
-    candidates = candidates[~candidates["movie_id"].isin(rated)]
+    candidates = candidates[~candidates["movie_id"].isin(mine["movie_id"])]
     candidates["predicted"] = candidates["movie_id"].map(predictions)
     candidates = candidates.dropna(subset=["predicted"])
+    # Shrink toward your mean over the same matched ratings the model was trained (and cached) on.
+    candidates["score"] = shrink(candidates["predicted"], candidates["count"], mine["rating"].mean(), args.shrink)
     if args.mix:
         out = mixed(candidates, args.top)
     else:
-        out = candidates.nlargest(args.top, "predicted")
+        out = candidates.nlargest(args.top, "score")
     out = out.reset_index(drop=True)
     return pd.DataFrame({
         "rank": out.index + 1,
         "title": out["slug"].map(readable),
+        "score": out["score"].round(2),
         "predicted": out["predicted"].clip(0.5, 5.0).round(2),
         "ratings": out["count"],
         "tier": out["tier"],
@@ -81,6 +94,8 @@ def parse_args():
     pop.add_argument("--mix", action="store_true", help="equal share from popular / mid / obscure tiers")
     p.add_argument("--min-count", type=int, default=50,
                    help="ignore films with fewer community ratings (default 50, like the original's MOVIE_MIN)")
+    p.add_argument("--shrink", type=float, default=300, metavar="K",
+                   help="rank by prediction shrunk toward your mean by K/(count+K); 0 = raw prediction (default 300)")
     p.add_argument("--overrides", type=Path, default=Path(__file__).parent / "overrides.csv",
                    help="Name,Year,slug fixes for unmatched titles (default ./overrides.csv)")
     p.add_argument("--sample", type=int, default=None, metavar="N",
@@ -108,7 +123,7 @@ def main():
               f"(baselines: your mean {h['my_mean_rmse']}, film's community mean {h['film_mean_rmse']})")
     print(f"Model: {m.meta['train_ratings']:,} ratings, {m.meta['train_seconds']}s, peak {m.meta['peak_rss_gb']} GB\n")
 
-    recs = recommend(films, m.predict(), set(matched["movie_id"]), args)
+    recs = recommend(films, m.predict(), matched, args)
     with pd.option_context("display.max_rows", None, "display.width", 200, "display.max_colwidth", 60):
         print(recs.to_string(index=False))
     if args.csv:
