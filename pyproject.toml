@@ -1,5 +1,5 @@
 [project]
-name = "letterboxd-recommender"
+name = "offboxd"
 version = "0.1.0"
 requires-python = ">=3.13"
 license = "GPL-3.0-only"

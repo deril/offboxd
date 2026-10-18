@@ -1,9 +1,10 @@
-# Letterboxd recommender
+# offboxd
 
-A local replacement for [letterboxd-recommendations](https://github.com/sdl60660/letterboxd_recommendations),
+Film recommendations from your Letterboxd ratings, computed on your own machine. A replacement for [letterboxd-recommendations](https://github.com/sdl60660/letterboxd_recommendations),
 which stopped working once Letterboxd blocked its scraper. Same idea: SVD collaborative filtering
 on Letterboxd community ratings, with you added as one more user, plus a popularity filter so you
-can dig past the films everyone has already seen.
+can dig past the films everyone has already seen. Nothing is scraped: after a one-time dataset
+download, everything runs locally.
 
 Community ratings come from the Hugging Face dataset
 [`titouann/letterboxd-10m-movies-ratings-2025`](https://huggingface.co/datasets/titouann/letterboxd-10m-movies-ratings-2025)
