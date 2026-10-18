@@ -36,7 +36,7 @@ an M-series Mac. Later runs reuse the cached model in `data/models/` and finish 
 | `--top N` | 50 | Number of recommendations. |
 | `--popularity N` | 0 | Exclude the top N% most-rated films (0–100), like the original site's slider. The percentile is over films with at least `--min-count` ratings. The run prints the rating-count cutoff it applied. |
 | `--mix` | off | Balanced list: an equal share of the best predictions from each popularity tier. Cannot be combined with `--popularity`. |
-| `--min-count N` | 5 | Ignore films with fewer than N community ratings, whose predictions are mostly noise. |
+| `--min-count N` | 50 | Ignore films with fewer than N community ratings. 50 matches the original's `MOVIE_MIN`. Lower values let small-fanbase titles (concert films, TV specials) flood the list. |
 | `--overrides PATH` | `./overrides.csv` | Manual title→slug fixes (see below). |
 | `--sample N` | full dataset | Train on ~N community ratings, sampled as whole users so each kept profile stays complete. |
 | `--retrain` | off | Ignore the cached model. |
@@ -51,7 +51,10 @@ therefore thirds of rating *volume*:
 
 - **popular**: the most-rated films that together hold the first third of all ratings (~1.4k films, 1,478+ ratings)
 - **mid**: the next third (~4.7k films, roughly 355–1,478 ratings)
-- **obscure**: everything else with at least `--min-count` ratings (~94k films)
+- **obscure**: everything else with at least `--min-count` ratings
+
+Recommendations are ranked by the raw SVD score, and the displayed rating is capped at 5.0 afterwards.
+Like the original, this keeps films predicted above 5.0 in order instead of tying them all at 5.0.
 
 That same long tail is why `--popularity` gets aggressive quickly: `--popularity 30` already
 excludes every film with 33+ ratings. Try `--popularity 1` to `--popularity 5` to drop just the
@@ -93,8 +96,8 @@ them next to two baselines (always predicting your mean, and predicting each fil
 ## Known quirks
 
 - Letterboxd lists TV series, concert films, and "making of" specials alongside films. Their small,
-  devoted audiences rate them ~4.8, so they crowd the top of the obscure end. Raising `--min-count`
-  (e.g. 100) or using `--mix` keeps them in check. The dataset has no metadata to filter them out.
+  devoted audiences rate them ~4.8, so the ones above `--min-count` can still rank high. The original
+  dropped TV using TMDB metadata, which this dataset doesn't have.
 - Titles are reconstructed from slugs, so punctuation is lost and a year suffix can appear
   (`Poor Things 2023`). The link column always goes to the right page.
 

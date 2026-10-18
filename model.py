@@ -37,8 +37,9 @@ class Model:
     meta: dict
 
     def predict(self) -> pd.Series:
+        """Unclipped scores: anything above 5.0 still ranks above a plain 5.0. Clip only for display."""
         scores = self.global_mean + self.my_bias + self.item_bias + self.item_factors @ self.my_factors
-        return pd.Series(np.clip(scores, 0.5, 5.0), index=self.movie_ids, name="predicted")
+        return pd.Series(scores, index=self.movie_ids, name="predicted")
 
 
 def _peak_rss() -> int:

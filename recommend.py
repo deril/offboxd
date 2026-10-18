@@ -64,7 +64,7 @@ def recommend(films: pd.DataFrame, predictions: pd.Series, rated: set, args) -> 
     return pd.DataFrame({
         "rank": out.index + 1,
         "title": out["slug"].map(readable),
-        "predicted": out["predicted"].round(2),
+        "predicted": out["predicted"].clip(0.5, 5.0).round(2),
         "ratings": out["count"],
         "tier": out["tier"],
         "url": "https://letterboxd.com/film/" + out["slug"] + "/",
@@ -79,7 +79,8 @@ def parse_args():
     pop.add_argument("--popularity", type=float, default=0, metavar="N",
                      help="exclude the top N%% most-rated films, 0-100 (default 0)")
     pop.add_argument("--mix", action="store_true", help="equal share from popular / mid / obscure tiers")
-    p.add_argument("--min-count", type=int, default=5, help="ignore films with fewer community ratings (default 5)")
+    p.add_argument("--min-count", type=int, default=50,
+                   help="ignore films with fewer community ratings (default 50, like the original's MOVIE_MIN)")
     p.add_argument("--overrides", type=Path, default=Path(__file__).parent / "overrides.csv",
                    help="Name,Year,slug fixes for unmatched titles (default ./overrides.csv)")
     p.add_argument("--sample", type=int, default=None, metavar="N",
