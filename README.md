@@ -26,7 +26,7 @@ uv run recommend.py --ratings ~/Downloads/letterboxd-<you>-<date>/ratings.csv --
 ```
 
 The first run downloads the dataset (~100 MB, cached in `data/hf/`). It then trains the model twice,
-once for the recommendations and once for the holdout check, which takes ~80 s and ~4.3 GB of RAM on
+once for the recommendations and once for the holdout check, which takes ~50 s and ~1.8 GB of RAM on
 an M-series Mac. Later runs reuse the cached model in `data/models/` and finish in about a second.
 
 ## Flags
@@ -90,9 +90,10 @@ that its 6.5k users rated.
 
 ## Model
 
-`scikit-surprise` SVD with its default hyperparameters (100 factors, 20 epochs). Stronger
+`scikit-surprise`'s SVD with its default hyperparameters (100 factors, 20 epochs), reimplemented as a
+numba-compiled loop that reproduces surprise's factors to float rounding. Stronger
 regularization was tested against a 2% community holdout and scored worse in every popularity
-bucket. Before training, the expected memory use (~450 B per rating) is checked against available
+bucket. Before training, the expected memory use (~80 B per rating) is checked against available
 RAM, and the training set is sampled down if it would not fit.
 
 The cache key is a hash of your *matched* ratings plus the sample size and model settings. Editing a
@@ -116,6 +117,8 @@ them next to two baselines (always predicting your mean, and predicting each fil
 
 - Inspired by [sdl60660/letterboxd_recommendations](https://github.com/sdl60660/letterboxd_recommendations).
   This is an independent reimplementation; no code was copied from it.
+- The SVD training loop in `model.py` is ported from [scikit-surprise](https://github.com/NicolasHug/Surprise)
+  (BSD-3-Clause, see [LICENSE-surprise](LICENSE-surprise)).
 - Ratings data: [`titouann/letterboxd-10m-movies-ratings-2025`](https://huggingface.co/datasets/titouann/letterboxd-10m-movies-ratings-2025),
   licensed **CC BY-NC-SA 4.0**: non-commercial use only. This tool downloads it at runtime and
   does not redistribute it.

@@ -6,9 +6,9 @@ license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 dependencies = [
     "huggingface-hub>=2.2.0",
+    "numba>=0.68.0",
     "numpy>=2.5.4",
     "pandas>=3.0.6",
     "psutil>=7.2.2",
     "pyarrow>=26.0.0",
-    "scikit-surprise>=1.1.5",
 ]

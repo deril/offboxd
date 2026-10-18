@@ -1,4 +1,4 @@
-"""SVD collaborative filtering (scikit-surprise) with me added as one extra user, cached to disk."""
+"""SVD collaborative filtering (surprise's SGD, compiled with numba) with me added as one extra user, cached to disk."""
 
 import hashlib
 import json
@@ -11,16 +11,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import psutil
-from surprise import SVD, Dataset, Reader
+from numba import njit
 
 from data import CACHE_DIR, DATASET_FILE, DATASET_REPO
 
 ME = 65535  # community user ids are 0..6518, so the top of uint16 is free
-# surprise defaults. reg_all 0.05/0.1 and reg_bi 0.2 all scored worse on a community holdout,
+# scikit-surprise's SVD defaults. reg_all 0.05/0.1 and reg_bi 0.2 all scored worse on a community holdout,
 # in every popularity bucket, and did not change which niche films top the list.
 SVD_PARAMS = dict(n_factors=100, n_epochs=20, lr_all=0.005, reg_all=0.02, random_state=42)
-# Peak RSS growth while building a surprise trainset and fitting SVD: ~390 B/rating on the full 10.4M.
-BYTES_PER_RATING = 450
+# Peak allocations while building the training arrays and fitting SVD: ~65 B/rating on the full 10.4M.
+BYTES_PER_RATING = 80
 MEMORY_BUDGET = 0.9  # share of "available" RAM; macOS undercounts it by leaving out compressible pages
 MODEL_DIR = CACHE_DIR / "models"
 
@@ -67,41 +67,73 @@ def fit_budget(requested: int) -> int:
     return requested
 
 
-def train(community: pd.DataFrame, mine: pd.DataFrame) -> tuple[SVD, dict]:
+@njit(cache=True)
+def _sgd(users, items, ratings, global_mean, pu, qi, n_epochs, lr, reg):
+    """scikit-surprise's SVD.sgd: same visit order, update rule and float64 arithmetic. Updates pu/qi in place."""
+    # Ported from surprise/prediction_algorithms/matrix_factorization.pyx, (c) 2016 Nicolas Hug, BSD-3-Clause:
+    # see LICENSE-surprise.
+    bu, bi = np.zeros(pu.shape[0]), np.zeros(qi.shape[0])
+    for _ in range(n_epochs):
+        for k in range(len(ratings)):
+            u, i = users[k], items[k]
+            dot = 0.0
+            for f in range(pu.shape[1]):
+                dot += qi[i, f] * pu[u, f]
+            err = ratings[k] - (global_mean + bu[u] + bi[i] + dot)
+            bu[u] += lr * (err - reg * bu[u])
+            bi[i] += lr * (err - reg * bi[i])
+            for f in range(pu.shape[1]):
+                puf, qif = pu[u, f], qi[i, f]
+                pu[u, f] += lr * (err * qif - reg * puf)
+                qi[i, f] += lr * (err * puf - reg * qif)
+    return bu, bi
+
+
+def fit(users: np.ndarray, movies: np.ndarray, ratings: np.ndarray) -> Model:
+    """SVD on (user, movie_id, rating) arrays, which must include ME.
+
+    Ids are numbered by first appearance and pu is drawn before qi from the same seeded RNG, as surprise
+    does, so on the same rows this reproduces surprise's factors up to float rounding.
+    """
+    u, user_ids = pd.factorize(users)
+    i, movie_ids = pd.factorize(movies)
+    p = SVD_PARAMS
+    rng = np.random.RandomState(p["random_state"])
+    pu = rng.normal(0, 0.1, (len(user_ids), p["n_factors"]))
+    qi = rng.normal(0, 0.1, (len(movie_ids), p["n_factors"]))
+    global_mean = float(ratings.mean())
+    bu, bi = _sgd(u.astype(np.int32), i.astype(np.int32), ratings, global_mean, pu, qi,
+                  p["n_epochs"], p["lr_all"], p["reg_all"])
+    me = np.flatnonzero(user_ids == ME)[0]
+    return Model(movie_ids=movie_ids.astype(np.uint32), item_bias=bi.astype(np.float32),
+                 item_factors=qi.astype(np.float32), my_bias=float(bu[me]), my_factors=pu[me].astype(np.float32),
+                 global_mean=global_mean, meta={})
+
+
+def train(community: pd.DataFrame, mine: pd.DataFrame) -> tuple[Model, dict]:
     """Fit SVD on community ratings plus mine (as user ME). Retries on a half-size sample if memory runs out."""
-    ratings = community[["user", "movie_id", "rating"]]
-    my_rows = pd.DataFrame({"user": ME, "movie_id": mine["movie_id"].to_numpy(), "rating": mine["rating"].to_numpy()})
     while True:
-        df = pd.concat([ratings, my_rows], ignore_index=True)
         start, rss_before = time.time(), _peak_rss()
         try:
-            trainset = Dataset.load_from_df(df, Reader(rating_scale=(0.5, 5.0))).build_full_trainset()
-            algo = SVD(**SVD_PARAMS)
-            algo.fit(trainset)
+            model = fit(np.concatenate([community["user"].to_numpy(), np.full(len(mine), ME, dtype=np.uint16)]),
+                        np.concatenate([community["movie_id"].to_numpy(), mine["movie_id"].to_numpy(np.uint32)]),
+                        np.concatenate([community["rating"].to_numpy(np.float64), mine["rating"].to_numpy(np.float64)]))
         except MemoryError:
-            ratings = sample_users(ratings, len(ratings) // 2)
-            print(f"  out of memory - retrying on {len(ratings):,} community ratings")
+            community = sample_users(community, len(community) // 2)
+            print(f"  out of memory - retrying on {len(community):,} community ratings")
             continue
-        stats = dict(train_ratings=len(df), train_seconds=round(time.time() - start, 1),
+        stats = dict(train_ratings=len(community) + len(mine), train_seconds=round(time.time() - start, 1),
                      peak_rss_gb=round(_peak_rss() / 1e9, 2), rss_growth_gb=round((_peak_rss() - rss_before) / 1e9, 2))
-        return algo, stats
-
-
-def to_model(algo: SVD, meta: dict) -> Model:
-    ts = algo.trainset
-    movie_ids = np.array([ts.to_raw_iid(i) for i in range(ts.n_items)], dtype=np.uint32)
-    me = ts.to_inner_uid(ME)
-    return Model(movie_ids=movie_ids, item_bias=algo.bi.astype(np.float32), item_factors=algo.qi.astype(np.float32),
-                 my_bias=float(algo.bu[me]), my_factors=algo.pu[me].astype(np.float32),
-                 global_mean=float(ts.global_mean), meta=meta)
+        return model, stats
 
 
 def holdout_rmse(community: pd.DataFrame, mine: pd.DataFrame, frac: float = 0.1, seed: int = 0) -> dict:
     """Train without a random 10% of my ratings and score the model on them, next to two naive baselines."""
     held = mine.sample(frac=frac, random_state=seed)
     kept = mine.drop(held.index)
-    algo, _ = train(community, kept)
-    pred = np.array([algo.predict(ME, mid).est for mid in held["movie_id"]])
+    model, _ = train(community, kept)
+    # As surprise's predict: a film missing from training gets the mean plus my bias, and estimates are clipped.
+    pred = model.predict().reindex(held["movie_id"]).fillna(model.global_mean + model.my_bias).clip(0.5, 5.0).to_numpy()
     truth = held["rating"].to_numpy()
     rmse = lambda p: round(float(np.sqrt(np.mean((p - truth) ** 2))), 3)
     item_mean = community.groupby("movie_id")["rating"].mean()
@@ -144,12 +176,12 @@ def get_model(community: pd.DataFrame, mine: pd.DataFrame, max_ratings: int | No
     sample = sample_users(community, size)
     print(f"Training SVD on {len(sample):,} community ratings from {sample['user'].nunique():,} users "
           f"+ your {len(mine)}...")
-    algo, stats = train(sample, mine)
+    model, stats = train(sample, mine)
     print(f"  done in {stats['train_seconds']}s, peak memory {stats['peak_rss_gb']} GB")
     meta = dict(stats, community_users=int(sample["user"].nunique()))
     if evaluate:
         print("Sanity check: retraining without 10% of your ratings...")
         meta["holdout"] = holdout_rmse(sample, mine)
-    model = to_model(algo, meta)
+    model.meta = meta
     save(model, path)
     return model
