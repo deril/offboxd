@@ -110,6 +110,15 @@ them next to two baselines (always predicting your mean, and predicting each fil
 - Titles are reconstructed from slugs, so punctuation is lost and a year suffix can appear
   (`Poor Things 2023`). The link column always goes to the right page.
 
+## Credits and data license
+
+- Inspired by [sdl60660/letterboxd_recommendations](https://github.com/sdl60660/letterboxd_recommendations).
+  This is an independent reimplementation; no code was copied from it.
+- Ratings data: [`titouann/letterboxd-10m-movies-ratings-2025`](https://huggingface.co/datasets/titouann/letterboxd-10m-movies-ratings-2025),
+  licensed **CC BY-NC-SA 4.0**: non-commercial use only. This tool downloads it at runtime and
+  does not redistribute it.
+- Not affiliated with or endorsed by Letterboxd. This tool does not scrape Letterboxd.
+
 ## Files
 
 - `data.py`: downloading/caching the dataset, reading the export, per-film rating counts
